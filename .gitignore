@@ -1,0 +1,21 @@
+# Файл с секретами
+secrets.py
+
+# Файлы настроек IDE
+.idea/
+.vscode/
+
+# Кэш Python
+__pycache__/
+*.pyc
+
+# Файлы логов
+*.log
+
+# Файлы памяти и настроек бота
+long_term_memory_*.json
+chat_settings_*.json
+
+# Виртуальное окружение (если вы его используете)
+venv/
+.venv/
