@@ -1006,7 +1006,7 @@ async def process_question(message: types.Message, question: str, memory_type: s
     attempt_count = 0
     while attempt_count < max_external_attempts:
         attempt_count += 1
-        logger.info(f"Обработка вопроса от пользователя {user_id}. Внешняя попытка {attempt_count}/{max_external_attempts}. Режим разработчика: {is_developer_mode}")
+        logger.info(f"Обработка вопроса от пользователя {user_name}. Внешняя попытка {attempt_count}/{max_external_attempts}. Режим разработчика: {is_developer_mode}")
         try:
             llm_messages_list: List[Dict[str, str]] = []
             chat_context_settings = storage.get_chat_context_settings(chat_id)
@@ -1119,7 +1119,7 @@ async def cmd_ask(message: types.Message, command: CommandObject, bot: Bot):
 
     # --- SCENARIO 1: Process Image Query ---
     if photo_message:
-        logger.info(f"Обработка /ask с изображением от пользователя {message.from_user.id} в чате {message.chat.id}")
+        logger.info(f"Обработка /ask с изображением от пользователя {message.from_user.username} в чате {message.chat.title}")
         status_msg = await safe_send_message(message, "🖼️ Анализирую изображение...", reply_to_message=True, parse_mode=None, bot_instance=bot)
 
         try:
@@ -1174,7 +1174,7 @@ async def cmd_ask(message: types.Message, command: CommandObject, bot: Bot):
 
     # --- SCENARIO 2: Process Text-Only Query ---
     else:
-        logger.info(f"Обработка команды ask/alias (только текст) от пользователя {message.from_user.id} в чате {message.chat.id}")
+        logger.info(f"Обработка команды ask/alias (только текст) от пользователя {message.from_user.username} в чате {message.chat.title}")
         await handle_command_with_question(message=message, command=command, allow_reply=True, memory_type="short")
 
 
@@ -1246,7 +1246,7 @@ async def handle_command_with_question(message: types.Message, command: CommandO
 
 @router.message(Command("long", "лонг"))
 async def cmd_long(message: types.Message, command: CommandObject):
-    logger.info(f"Обработка команды long от пользователя {message.from_user.id if message.from_user else 'unknown'} в чате {message.chat.id}")
+    logger.info(f"Обработка команды long от пользователя {message.from_user.username if message.from_user else 'unknown'} в чате {message.chat.title}")
     await handle_command_with_question(message=message, command=command, allow_reply=False, memory_type="long")
 
 @router.message(Command("clear", "клир", "клиар", "отчистить", "сброс"))
