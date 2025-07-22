@@ -55,6 +55,7 @@ PROVIDERS = {
         "Gemini 2.5 Flash (Official API)": {
         "model_name": "gemini-2.5-flash",
         "provider": "OfficialGoogle", # Специальный флаг для нашего кода
+        "enable_search": True,
         "developer_only": False,
     },
         "Gemini 2.5 Flash-Lite Preview (Official API)": {
