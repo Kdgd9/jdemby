@@ -209,7 +209,7 @@ PROVIDERS = {
 }
 
 
-DEFAULT_MODEL = "Gemini 1.5 Flash-8B (Official API)"
+DEFAULT_MODEL = "Gemini 2.5 Flash (Official API)"
 # blacklist: Liaobots GigaChat Pizzagpt DDG TypeGPT ChatGptEs
 
 
@@ -245,4 +245,4 @@ IMAGE_PROVIDERS_CONFIG = {
     },
 }
 
-DEFAULT_IMAGE_MODEL = "Flux (ARTA)"
+DEFAULT_IMAGE_MODEL = "sdxl (ImageLabs)"
