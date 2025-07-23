@@ -2,7 +2,7 @@
 # COPYRIGHT ZhdomDev
 # Optimized version with Vision capabilities
 
-__version__ = "0.12.2" # Версия бота (исправлена логика распознавания и контекста изображений)
+__version__ = "0.12.3" # Версия бота (исправлена логика распознавания и контекста изображений)
 
 import logging
 import re
