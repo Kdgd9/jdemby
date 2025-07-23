@@ -34,6 +34,7 @@ import g4f.errors
 
 # Gemini Vision imports
 import google.generativeai as genai
+from google.generativeai import types as genai_types
 from PIL import Image
 
 # Импортируем BOT_LEGEND напрямую из bot_legend.py
@@ -324,76 +325,64 @@ async def get_text_from_gemini_api(model_name: str, history: List[Dict[str, Any]
     """
     Отправляет историю чата в указанную модель Gemini и возвращает текстовый ответ.
     """
+async def get_text_from_gemini_api(model_name: str, history: List[Dict[str, Any]], use_search: bool = False) -> str:
     try:
         if not history:
             return "Ошибка: история сообщений пуста."
-
         system_prompts = []
         chat_history_for_merge = []
-
         for msg in history:
             if msg['role'] == 'system':
                 system_prompts.append(msg['content'])
             else:
                 chat_history_for_merge.append(msg)
-
         merged_chat_parts = []
         if chat_history_for_merge:
             current_role = chat_history_for_merge[0]['role']
             current_content = chat_history_for_merge[0]['content']
-
             for i in range(1, len(chat_history_for_merge)):
                 if chat_history_for_merge[i]['role'] == current_role:
                     current_content += "\n\n" + chat_history_for_merge[i]['content']
                 else:
-                    # Gemini API использует роль 'model' вместо 'assistant'
                     role_to_add = 'model' if current_role == 'assistant' else current_role
                     merged_chat_parts.append({'role': role_to_add, 'parts': [{'text': current_content}]})
                     current_role = chat_history_for_merge[i]['role']
                     current_content = chat_history_for_merge[i]['content']
-                
-            # Добавляем последнее объединенное сообщение
             role_to_add = 'model' if current_role == 'assistant' else current_role
             merged_chat_parts.append({'role': role_to_add, 'parts': [{'text': current_content}]})
-
-        # Если первый элемент в истории не 'user', это может вызвать ошибку.
-        # Gemini API чат должен начинаться с 'user'.
-        # Удаляем первый элемент, если он 'model'.
         if merged_chat_parts and merged_chat_parts[0]['role'] == 'model':
             logger.warning("History starts with 'model' role, removing it for Gemini compatibility.")
             merged_chat_parts.pop(0)
-
-        # Отделяем последний промпт пользователя
         last_user_prompt_content = ""
         if merged_chat_parts and merged_chat_parts[-1]['role'] == 'user':
             last_user_message = merged_chat_parts.pop(-1)
-            # Content in last_user_message['parts'][0]['text']
             last_user_prompt_content = last_user_message['parts'][0]['text']
-        elif history: # Fallback for cases where merged_chat_parts might be empty or last is not user
-             # This handles initial user messages that might not go through the merge logic if it's a single message
-             # Or if after merging, the last message wasn't from user.
-             # We take the content of the very last message in the original history as the user's prompt.
+        elif history:
             original_last_message = history[-1]
             if original_last_message['role'] == 'user':
                 last_user_prompt_content = original_last_message['content']
             else:
                 logger.warning("Last message in history is not from 'user'. Cannot determine last user prompt correctly.")
                 return "Ошибка: Не удалось определить последний запрос пользователя."
-
-
-        model = genai.GenerativeModel(
-            model_name=model_name,
-            system_instruction="\n".join(system_prompts)
-        )
+        if use_search:
+            grounding_tool = genai_types.Tool(google_search=genai_types.GoogleSearch())
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                system_instruction="\n".join(system_prompts),
+                tools=[grounding_tool]
+            )
+        else:
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                system_instruction="\n".join(system_prompts)
+            )
         chat = model.start_chat(history=merged_chat_parts)
-        
         response = await chat.send_message_async(last_user_prompt_content, request_options={"timeout": 120})
         return response.text
-
     except Exception as e:
         logger.error(f"Ошибка при работе с Gemini API (Text): {e}")
         raise e
-
+    
 # --- New function for Imagen API integration ---
 async def generate_image_with_imagen(model_name: str, prompt: str) -> List[str]:
     """
@@ -563,21 +552,23 @@ class ChatContext:
 _DEFAULT_READ_GENERAL_CHAT_MESSAGES_ENABLED = False
 _DEFAULT_SHORT_TERM_MESSAGE_LIMIT = MAX_CONTEXT_LENGTH * 2
 _DEFAULT_CONTEXT_TYPES_ENABLED = {'legend': True, 'long': True, 'short': True}
+_DEFAULT_SEARCH_ENABLED = False  # Новое значение по умолчанию для поиска
 
 class Storage:
     def __init__(self):
-        self.contexts: Dict[int, ChatContext] = {}
-        self.models: Dict[int, str] = {}
-        self.image_models: Dict[int, str] = {}
-        self.reply_modes: Dict[int, str] = {}
-        self.context_types_enabled: Dict[int, Dict[str, bool]] = {}
-        self.read_general_chat_messages_enabled: Dict[int, bool] = {}
-        self.short_term_limits: Dict[int, int] = {}
-        self.active_chats: Dict[int, Dict[str, Any]] = {}
-        self.developer_modes: Dict[int, bool] = {}
+            self.contexts: Dict[int, ChatContext] = {}
+            self.models: Dict[int, str] = {}
+            self.image_models: Dict[int, str] = {}
+            self.reply_modes: Dict[int, str] = {}
+            self.context_types_enabled: Dict[int, Dict[str, bool]] = {}
+            self.read_general_chat_messages_enabled: Dict[int, bool] = {}
+            self.short_term_limits: Dict[int, int] = {}
+            self.active_chats: Dict[int, Dict[str, Any]] = {}
+            self.developer_modes: Dict[int, bool] = {}
+            self.search_enabled: Dict[int, bool] = {} 
 
     def _get_key(self, chat_id: int, user_id: int, is_group: bool) -> int:
-        return chat_id if is_group else user_id
+            return chat_id if is_group else user_id
 
     def _get_settings_filepath(self, key: int) -> str:
         return f"chat_settings_{key}.json"
@@ -591,6 +582,7 @@ class Storage:
         if key not in self.read_general_chat_messages_enabled: self.read_general_chat_messages_enabled[key] = _DEFAULT_READ_GENERAL_CHAT_MESSAGES_ENABLED
         if key not in self.short_term_limits: self.short_term_limits[key] = _DEFAULT_SHORT_TERM_MESSAGE_LIMIT
         if key not in self.developer_modes: self.developer_modes[key] = False
+        if key not in self.search_enabled: self.search_enabled[key] = _DEFAULT_SEARCH_ENABLED  # Инициализация флага поиска
         if os.path.exists(filepath):
             try:
                 with open(filepath, 'r', encoding='utf-8') as f:
@@ -604,12 +596,13 @@ class Storage:
                         self.context_types_enabled[key] = {**_DEFAULT_CONTEXT_TYPES_ENABLED, **loaded_context_types}
                         if 'ultra_short' in self.context_types_enabled[key]: del self.context_types_enabled[key]['ultra_short']
                         if 'group_text_to_short_term' in loaded_context_types:
-                             self.read_general_chat_messages_enabled[key] = loaded_context_types['group_text_to_short_term']
-                             del self.context_types_enabled[key]['group_text_to_short_term']
+                            self.read_general_chat_messages_enabled[key] = loaded_context_types['group_text_to_short_term']
+                            del self.context_types_enabled[key]['group_text_to_short_term']
                     else:
                         self.context_types_enabled[key] = _DEFAULT_CONTEXT_TYPES_ENABLED.copy()
                     self.read_general_chat_messages_enabled[key] = settings_data.get('read_general_chat_messages_enabled', _DEFAULT_READ_GENERAL_CHAT_MESSAGES_ENABLED)
                     self.short_term_limits[key] = settings_data.get('short_term_limit', _DEFAULT_SHORT_TERM_MESSAGE_LIMIT)
+                    self.search_enabled[key] = settings_data.get('search_enabled', _DEFAULT_SEARCH_ENABLED)  # Загрузка флага поиска
                     logger.info(f"Настройки загружены для ключа {key} из {filepath}")
             except (json.JSONDecodeError, IOError, Exception) as e:
                 logger.error(f"Ошибка при загрузке настроек для ключа {key} из {filepath}: {e}. Используются текущие значения по умолчанию.")
@@ -628,7 +621,8 @@ class Storage:
             'developer_mode': self.developer_modes.get(key, False),
             'context_types_enabled': context_types_to_save,
             'read_general_chat_messages_enabled': self.read_general_chat_messages_enabled.get(key, _DEFAULT_READ_GENERAL_CHAT_MESSAGES_ENABLED),
-            'short_term_limit': self.short_term_limits.get(key, _DEFAULT_SHORT_TERM_MESSAGE_LIMIT)
+            'short_term_limit': self.short_term_limits.get(key, _DEFAULT_SHORT_TERM_MESSAGE_LIMIT),
+            'search_enabled': self.search_enabled.get(key, _DEFAULT_SEARCH_ENABLED)  # Сохранение флага поиска
         }
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
@@ -636,6 +630,15 @@ class Storage:
             logger.info(f"Настройки сохранены для ключа {key} в {filepath}")
         except (IOError, Exception) as e:
             logger.error(f"Ошибка при сохранении настроек для ключа {key} в {filepath}: {e}")
+
+    def get_search_enabled(self, chat_id: int) -> bool:
+        if chat_id not in self.search_enabled: self._load_settings_for_key(chat_id)
+        return self.search_enabled.get(chat_id, _DEFAULT_SEARCH_ENABLED)
+
+    def set_search_enabled(self, chat_id: int, enabled: bool):
+        self.search_enabled[chat_id] = enabled
+        self._save_settings_for_key(chat_id)
+        logger.info(f"Функция поиска для чата {chat_id} установлена на {enabled}")
 
     def get_context(self, chat_id: int, user_id: int, is_group: bool) -> ChatContext:
         key = self._get_key(chat_id, user_id, is_group)
@@ -888,27 +891,22 @@ async def save_state_periodically():
             logger.error(f"Ошибка во время периодического сохранения состояния: {e}", exc_info=True)
 
 # --- Core Logic for LLM interaction ---
-async def attempt_llm_request(messages_to_send: List[Dict[str, str]], initial_model_key: str, model_config_dict: Dict[str, Dict[str, Any]], available_model_keys: List[str], g4f_function: Callable, is_image_generation: bool = False, image_generation_prompt: Optional[str] = None, max_attempts: int = 3, chat_id_for_log: int = 0, user_id_for_log: Optional[int] = 0, status_message_to_update: Optional[types.Message] = None, bot_for_status_update: Optional[Bot] = None, is_developer_mode: bool = False) -> Any:
-    # Проверяем, является ли выбранная модель официальной моделью Google
+async def attempt_llm_request(messages_to_send: List[Dict[str, str]], initial_model_key: str, model_config_dict: Dict[str, Dict[str, Any]], available_model_keys: List[str], g4f_function: Callable, is_image_generation: bool = False, image_generation_prompt: Optional[str] = None, max_attempts: int = 3, chat_id_for_log: int = 0, user_id_for_log: Optional[int] = 0, status_message_to_update: Optional[types.Message] = None, bot_for_status_update: Optional[Bot] = None, is_developer_mode: bool = False, use_search: bool = False) -> Any:
     initial_model_config = model_config_dict.get(initial_model_key)
     if initial_model_config and initial_model_config.get("provider") == "OfficialGoogle":
-        logger.info(f"[Chat {chat_id_for_log}] [User {user_id_for_log}] Используется официальный Google API с моделью '{initial_model_key}'")
+        logger.info(f"[Chat {chat_id_for_log}] [User {user_id_for_log}] Используется официальный Google API с моделью '{initial_model_key}', поиск: {use_search}")
         model_name = initial_model_config.get("model_name")
+        enable_search = initial_model_config.get("enable_search", False)
         try:
             if is_image_generation:
-                # Вызываем новую функцию для генерации изображений через Imagen API
                 image_urls = await generate_image_with_imagen(model_name, image_generation_prompt)
                 return image_urls
             else:
-                # Вызываем существующую функцию для генерации текста через Gemini API
-                response = await get_text_from_gemini_api(model_name, messages_to_send)
+                response = await get_text_from_gemini_api(model_name, messages_to_send, use_search=use_search and enable_search)
                 return response
         except Exception as e:
             logger.error(f"[Chat {chat_id_for_log}] Вызов официального Google API завершился ошибкой для модели '{initial_model_key}': {e}")
-            # Передаем ошибку дальше, чтобы process_question мог ее показать
             raise e
-
-    # Если это не модель от Google, продолжаем использовать существующую логику g4f
     if not available_model_keys: raise ValueError("No available models configured.")
     effective_max_attempts = 1 if is_developer_mode else max_attempts
     ordered_keys_to_try = [initial_model_key] + [m for m in available_model_keys if m != initial_model_key]
@@ -919,12 +917,10 @@ async def attempt_llm_request(messages_to_send: List[Dict[str, str]], initial_mo
     current_model_key_index = 0
     while actual_attempts_done < effective_max_attempts and current_model_key_index < len(ordered_keys_to_try):
         current_model_key = ordered_keys_to_try[current_model_key_index]
-        # Пропускаем модели Google в цикле g4f
         current_provider_config = model_config_dict.get(current_model_key)
         if not current_provider_config or current_provider_config.get("provider") == "OfficialGoogle":
             current_model_key_index += 1
             continue
-
         actual_attempts_done += 1
         current_provider_config = model_config_dict.get(current_model_key)
         if not current_provider_config:
@@ -968,7 +964,7 @@ async def attempt_llm_request(messages_to_send: List[Dict[str, str]], initial_mo
             if actual_attempts_done < effective_max_attempts: await asyncio.sleep(1)
         except (g4f.errors.MissingAuthError, g4f.errors.MissingRequirementsError, g4f.errors.NoValidHarFileError) as e:
             last_exception_seen = e
-            logger.error(f"[Chat {chat_id_for_log}] Ошибка настройки провайдера с '{current_model_key}': {e}.")
+            logger.error(f"[Chat {chat_id_for_log}] Ошибка настройки провайдера с '{current_model_key}': {e}")
             raise e
         except Exception as e:
             last_exception_seen = e
@@ -995,7 +991,7 @@ async def process_question(message: types.Message, question: str, memory_type: s
     chat_title = message.chat.title if is_group else "Private Chat"
     user_name = message.from_user.full_name or message.from_user.first_name
     await log_user_activity(chat_id, chat_title, user_name, user_id, message.chat.type)
-    context = storage.get_context(chat_id, user_id, is_group) 
+    context = storage.get_context(chat_id, user_id, is_group)
     initial_model_key = storage.get_model_key(chat_id)
     if not PROVIDERS:
         await safe_send_message(message, "⚠️ Ошибка: Список моделей пуст.", reply_to_message=True, parse_mode=None, bot_instance=message.bot)
@@ -1004,9 +1000,10 @@ async def process_question(message: types.Message, question: str, memory_type: s
     full_response = ""
     max_external_attempts = 1 if is_developer_mode else 2
     attempt_count = 0
+    search_enabled = storage.get_search_enabled(chat_id)  # Получение состояния поиска
     while attempt_count < max_external_attempts:
         attempt_count += 1
-        logger.info(f"Обработка вопроса от пользователя {user_name}. Внешняя попытка {attempt_count}/{max_external_attempts}. Режим разработчика: {is_developer_mode}")
+        logger.info(f"Обработка вопроса от пользователя {user_id}. Внешняя попытка {attempt_count}/{max_external_attempts}. Режим разработчика: {is_developer_mode}, Поиск: {search_enabled}")
         try:
             llm_messages_list: List[Dict[str, str]] = []
             chat_context_settings = storage.get_chat_context_settings(chat_id)
@@ -1017,7 +1014,21 @@ async def process_question(message: types.Message, question: str, memory_type: s
             valid_llm_messages = [m for m in llm_messages_list if isinstance(m, dict) and 'role' in m and 'content' in m]
             if not valid_llm_messages: raise ValueError("Нет действительных сообщений для промпта LLM.")
             all_available_text_models = storage.get_available_models(for_dev_mode=is_developer_mode)
-            full_response = await attempt_llm_request(messages_to_send=valid_llm_messages, initial_model_key=initial_model_key, model_config_dict=PROVIDERS, available_model_keys=all_available_text_models, g4f_function=g4f.ChatCompletion.create_async, is_image_generation=False, max_attempts=MAX_PROVIDER_RETRIES, chat_id_for_log=chat_id, user_id_for_log=user_id, status_message_to_update=status_msg, bot_for_status_update=message.bot, is_developer_mode=is_developer_mode)
+            full_response = await attempt_llm_request(
+                messages_to_send=valid_llm_messages,
+                initial_model_key=initial_model_key,
+                model_config_dict=PROVIDERS,
+                available_model_keys=all_available_text_models,
+                g4f_function=g4f.ChatCompletion.create_async,
+                is_image_generation=False,
+                max_attempts=MAX_PROVIDER_RETRIES,
+                chat_id_for_log=chat_id,
+                user_id_for_log=user_id,
+                status_message_to_update=status_msg,
+                bot_for_status_update=message.bot,
+                is_developer_mode=is_developer_mode,
+                use_search=search_enabled  # Передача флага поиска
+            )
             if full_response: break
             else:
                 if not is_developer_mode and attempt_count < max_external_attempts: await asyncio.sleep(RETRY_DELAY_SECONDS); continue
@@ -1069,7 +1080,6 @@ async def cmd_start(message: types.Message, bot: Bot):
         except Exception as e:
             logger.error(f"Не удалось получить имя пользователя бота: {e}")
             BOT_USERNAME = "UnknownBot"
-
     help_text = (
         f"👋 Привет! Я <b>Ждёмби-бот</b> v{__version__}\n\n"
         "Я умею отвечать на вопросы, генерировать изображения и просто болтать в чате.\n\n"
@@ -1079,6 +1089,7 @@ async def cmd_start(message: types.Message, bot: Bot):
         "• <code>/ask [вопрос к картинке]</code> - <b>(NEW)</b> Отправьте картинку с этой командой в подписи, чтобы задать вопрос по ней.\n"
         "• <code>/long [текст]</code> - Добавить информацию в долгосрочную память бота.\n"
         "• <code>/image [описание]</code> - Сгенерировать изображение по тексту.\n"
+        "• <code>/search</code> - Включить/выключить использование Google Search для ответов.\n"
         "• <code>/clear</code> - Очистить краткосрочную память.\n"
         "• <code>/fullreset</code> - Полностью очистить всю память и настройки.\n"
         "• <code>/model</code> & <code>/imagemodel</code> - Выбрать другие модели ИИ.\n"
@@ -1486,7 +1497,8 @@ async def cmd_memstats(message: types.Message):
                      f"Легенда: <b>{'Вкл' if settings.get('legend', True) else 'Выкл'}</b>\n"
                      f"Долгосрочная: <b>{'Вкл' if settings.get('long', True) else 'Выкл'}</b>\n"
                      f"Краткосрочная: <b>{'Вкл' if settings.get('short', True) else 'Выкл'}</b>\n"
-                     f"Чтение чата: <b>{'Вкл' if storage.get_read_general_chat_messages_enabled(message.chat.id) else 'Выкл'}</b>\n\n"
+                     f"Чтение чата: <b>{'Вкл' if storage.get_read_general_chat_messages_enabled(message.chat.id) else 'Выкл'}</b>\n"
+                     f"Поиск Google: <b>{'Вкл' if storage.get_search_enabled(message.chat.id) else 'Выкл'}</b>\n\n"
                      f"🛠 Режим разработчика: <b>{'Вкл' if storage.get_developer_mode(message.chat.id) else 'Выкл'}</b>")
     await safe_send_message(message, response_text, reply_to_message=False, parse_mode=ParseMode.HTML, bot_instance=message.bot)
 
@@ -1497,6 +1509,16 @@ async def cmd_devmode(message: types.Message):
     new_mode = not storage.get_developer_mode(chat_id)
     storage.set_developer_mode(chat_id, new_mode)
     await safe_send_message(message, f"🛠 Режим разработчика <b>{'включен' if new_mode else 'выключен'}</b>.", reply_to_message=False, parse_mode=ParseMode.HTML, bot_instance=message.bot)
+
+@router.message(Command("search", "поиск"))
+async def cmd_search(message: types.Message):
+    if not message.from_user: return
+    chat_id = message.chat.id
+    current_search_enabled = storage.get_search_enabled(chat_id)
+    new_search_enabled = not current_search_enabled
+    storage.set_search_enabled(chat_id, new_search_enabled)
+    state = "включена" if new_search_enabled else "выключена"
+    await safe_send_message(message, f"🔍 Функция поиска {state}.", reply_to_message=False, parse_mode=ParseMode.HTML, bot_instance=message.bot)
 
 # --- Message Handlers ---
 @router.message(F.text, F.chat.type == ChatType.PRIVATE)
