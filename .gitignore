@@ -1,5 +1,6 @@
 # Файл с секретами
 secrets.py
+api_keys.py
 
 # Файлы настроек IDE
 .idea/
