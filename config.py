@@ -52,20 +52,25 @@ MIN_INTERVAL = 60 # Минимальный интервал для случай�
 # Настройки моделей
 PROVIDERS = {
     # Gemini API
-        "Gemini 2.5 Flash (Official API)": {
+        "Gemini 2.5 Flash": {
         "model_name": "gemini-2.5-flash",
         "provider": "OfficialGoogle", # Специальный флаг для нашего кода
         "enable_search": True,
         "developer_only": False,
     },
-        "Gemini 2.5 Flash-Lite Preview (Official API)": {
+        "Gemini 2.5 Flash-Lite Preview": {
         "model_name": "gemini-2.5-flash-lite-preview-06-17",
         "provider": "OfficialGoogle", # Специальный флаг для нашего кода
         "developer_only": False,
     },
-        "Gemini 1.5 Flash-8B (Official API)": {
+        "Gemini 1.5 Flash-8B": {
         "model_name": "gemini-1.5-flash-8b",
-        "provider": "OfficialGoogle", # Специальный флаг для нашего кода
+        "provider": "OfficialGoogle",
+        "developer_only": False,
+    },
+        "Gemini 2.5 Pro": {
+        "model_name": "gemini-2.5-pro",
+        "provider": "OfficialGoogle",
         "developer_only": False,
     },
 
