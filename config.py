@@ -52,6 +52,12 @@ MIN_INTERVAL = 60 # Минимальный интервал для случай�
 # Настройки моделей
 PROVIDERS = {
     # Gemini API
+        "vertex_gemini": {
+        "provider": "OfficialGoogleVertex",
+        "model_name": "gemini-2.5-flash",
+        "enable_search": True,
+        "developer_only": False,
+    },
         "Gemini 2.5 Flash": {
         "model_name": "gemini-2.5-flash",
         "provider": "OfficialGoogle", # Специальный флаг для нашего кода

@@ -36,6 +36,9 @@ import g4f.errors
 import google.generativeai as genai
 from google.generativeai import types as genai_types
 from PIL import Image
+from google import genai as genai_vertex
+from google.genai.types import GenerateContentConfig, GoogleSearch, Tool, HttpOptions
+
 
 # Импортируем BOT_LEGEND напрямую из bot_legend.py
 try:
@@ -89,7 +92,7 @@ logger = logging.getLogger(__name__)
 try:
     if GEMINI_API_KEY:
         genai.configure(api_key=GEMINI_API_KEY)
-        vision_model = genai.GenerativeModel('gemini-1.5-flash')
+        vision_model = genai.GenerativeModel('gemini-2.5-flash')
         logger.info("Google Gemini Vision model initialized successfully.")
     else:
         vision_model = None
@@ -383,6 +386,28 @@ async def get_text_from_gemini_api(model_name: str, history: List[Dict[str, Any]
         logger.error(f"Ошибка при работе с Gemini API (Text): {e}")
         raise e
     
+async def get_text_from_vertex(model_name: str, prompt: str, use_search: bool = False) -> str:
+    """
+    Отправляет запрос в модель Gemini через Vertex AI SDK (Gen AI SDK).
+    """
+    if not client_vertex:
+        return "Ошибка: Клиент Vertex AI не инициализирован."
+
+    try:
+        tools = []
+        if use_search:
+            tools = [Tool(google_search=GoogleSearch())]
+
+        response = client_vertex.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=GenerateContentConfig(tools=tools),
+        )
+        return response.text
+    except Exception as e:
+        logger.error(f"Ошибка Vertex SDK: {e}")
+        return f"⚠️ Ошибка при обращении к Vertex AI: {e}"
+
 # --- New function for Imagen API integration ---
 async def generate_image_with_imagen(model_name: str, prompt: str) -> List[str]:
     """
@@ -438,6 +463,15 @@ async def generate_image_with_imagen(model_name: str, prompt: str) -> List[str]:
     except Exception as e:
         logger.error(f"Непредвиденная ошибка при генерации изображения с Imagen: {e}")
         raise ValueError(f"Непредвиденная ошибка генерации Imagen: {e}")
+
+
+# --- Vertex AI (Gen AI SDK) Setup ---
+try:
+    client_vertex = genai_vertex.Client(http_options=HttpOptions(api_version="v1"))
+    logger.info("Vertex AI client initialized successfully.")
+except Exception as e:
+    client_vertex = None
+    logger.error(f"Failed to initialize Vertex AI client: {e}")
 
 
 # --- Context Management ---
@@ -892,7 +926,23 @@ async def save_state_periodically():
 
 # --- Core Logic for LLM interaction ---
 async def attempt_llm_request(messages_to_send: List[Dict[str, str]], initial_model_key: str, model_config_dict: Dict[str, Dict[str, Any]], available_model_keys: List[str], g4f_function: Callable, is_image_generation: bool = False, image_generation_prompt: Optional[str] = None, max_attempts: int = 3, chat_id_for_log: int = 0, user_id_for_log: Optional[int] = 0, status_message_to_update: Optional[types.Message] = None, bot_for_status_update: Optional[Bot] = None, is_developer_mode: bool = False, use_search: bool = False) -> Any:
+
+    
     initial_model_config = model_config_dict.get(initial_model_key)
+
+    if initial_model_config and initial_model_config.get("provider") == "OfficialGoogleVertex":
+        logger.info(f"[Chat {chat_id_for_log}] [User {user_id_for_log}] Используется Vertex AI SDK с моделью '{initial_model_key}', поиск: {use_search}")
+        model_name = initial_model_config.get("model_name", "gemini-2.5-flash")
+        try:
+            if is_image_generation:
+                raise ValueError("Генерация изображений через Vertex SDK пока не реализована.")
+            else:
+                response = await get_text_from_vertex(model_name, messages_to_send[-1]["content"], use_search=use_search)
+                return response
+        except Exception as e:
+            logger.error(f"[Chat {chat_id_for_log}] Вызов Vertex AI SDK завершился ошибкой: {e}")
+            raise e
+        
     if initial_model_config and initial_model_config.get("provider") == "OfficialGoogle":
         logger.info(f"[Chat {chat_id_for_log}] [User {user_id_for_log}] Используется официальный Google API с моделью '{initial_model_key}', поиск: {use_search}")
         model_name = initial_model_config.get("model_name")
